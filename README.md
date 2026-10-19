@@ -33,7 +33,7 @@ Not measured yet: peak memory and CPU use during load.
 
 ## Failure injection (milestone 2)
 
-Nine ways to break it on purpose, run against real data. All nine pass now, but the first run did not: three of the failures were real bugs in this project (see [DECISIONS.md](DECISIONS.md)).
+Nine ways to break it on purpose, run against real data. All nine pass now, but the first run did not. It turned up two real bugs (a row count missed damage inside a file, and two loaders at once could fail a file for good) plus a mistake in my own test harness. Details in [DECISIONS.md](DECISIONS.md).
 
 | Break | What happens |
 |---|---|
