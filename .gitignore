@@ -1,0 +1,15 @@
+# working notes: kept local, not shown publicly
+docs/
+
+content/
+
+.claude-brain/
+
+.scaffold.md
+
+# data and build output
+data/
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
