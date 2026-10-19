@@ -7,6 +7,7 @@ from pathlib import Path
 import duckdb
 
 from . import manifest
+from .download import sha256_of
 
 CHUNK = 1 << 20
 
@@ -71,15 +72,16 @@ def load_file(raw: Path, good: Path, quarantine: Path) -> tuple[int, int, int]:
 
 def run(con, raw_dir: Path, out_dir: Path) -> tuple[int, int]:
     ok = failed = 0
-    for r in manifest.rows_with_status(con, "downloaded"):
+    for r in manifest.rows_with_status(con, "downloaded") + manifest.rows_with_status(con, "load_failed"):
         good = out_dir / "good" / f"day={r['day']}" / f"hour={r['hour']:02d}.parquet"
         quar = out_dir / "quarantine" / f"day={r['day']}" / f"hour={r['hour']:02d}.parquet"
         try:
             n_in, n_ok, n_bad = load_file(raw_dir / r["name"], good, quar)
             manifest.update(con, r["name"], status="loaded", rows_in=n_in, rows_loaded=n_ok,
-                            rows_quarantined=n_bad, error=None)
+                            rows_quarantined=n_bad, good_sha256=sha256_of(good),
+                            quarantine_sha256=sha256_of(quar), error=None)
             ok += 1
         except Exception as e:
-            manifest.update(con, r["name"], status="failed", error=f"load: {e}"[:300])
+            manifest.update(con, r["name"], status="load_failed", error=f"load: {e}"[:300])
             failed += 1
     return ok, failed

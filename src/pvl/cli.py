@@ -24,8 +24,17 @@ def _load(con, args) -> None:
     print(f"load: {ok} ok, {failed} failed")
 
 
+def parse_hours(spec: str) -> list[int]:
+    """'0-23' or '0-2,5' -> [0, 1, 2, 5]"""
+    out: list[int] = []
+    for part in spec.split(","):
+        lo, _, hi = part.partition("-")
+        out.extend(range(int(lo), int(hi or lo) + 1))
+    return out
+
+
 def _reconcile(con, args) -> int:
-    problems, t = reconcile(con, args.data / "parquet")
+    problems, t = reconcile(con, args.data / "parquet", parse_hours(args.expected_hours))
     print(f"files={t['files']} loaded={t['loaded_files']} rows_in={t['rows_in']:,} "
           f"loaded={t['rows_loaded']:,} quarantined={t['rows_quarantined']:,}")
     for p in problems:
@@ -41,10 +50,23 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("plan", "run"):
         p = sub.add_parser(name)
         p.add_argument("--day", required=True, help="YYYY-MM-DD")
-    for name in ("download", "load", "reconcile"):
+    for name in ("download", "load"):
         sub.add_parser(name)
+    rec = sub.add_parser("reconcile")
+    rec.add_argument("--expected-hours", default="0-23", help="hours every day must have (default 0-23)")
     args = ap.parse_args(argv)
 
+    if args.cmd in ("download", "load", "run"):
+        try:
+            with manifest.exclusive(args.data):
+                return _dispatch(args)
+        except manifest.Busy as e:
+            print(f"pvl: {e}", file=sys.stderr)
+            return 3
+    return _dispatch(args)
+
+
+def _dispatch(args) -> int:
     con = manifest.connect(args.data)
     if args.cmd == "plan":
         _plan(con, args)
@@ -58,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         _plan(con, args)
         _download(con, args)
         _load(con, args)
+        args.expected_hours = "0-23"
         return _reconcile(con, args)
     return 0
 

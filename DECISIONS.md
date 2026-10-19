@@ -61,3 +61,35 @@ packages. This project pins 3.12 with uv and never installs into the global inte
    a flipped bit inside the stream raises `zlib.error`, which is neither. The corrupt file escaped
    with its `.part` left behind and no clear message. A test that flips one bit caught it before
    any real file did.
+
+## Milestone 2: break it on purpose
+
+`scripts/chaos.py` builds a fresh data directory from three real hourly files, breaks one thing,
+and checks what the loader and the reconcile step did. Downloads come from a local throttled
+server so a kill lands mid-transfer every time and Wikimedia is not hit again. "kill -9" on
+Windows is `Popen.kill()`, which calls TerminateProcess: no cleanup code runs in the victim.
+
+### What failed, in the order I found it
+
+1. **The first run said 5 of 9 passed, and most of the failures were my harness.** The check that
+   every day has 24 hours reported 21 missing hours, because the test only loaded 3. I added
+   `reconcile --expected-hours` instead of weakening the check.
+2. **Bit rot inside a Parquet file passed reconcile.** I damaged 64 bytes in the middle of a good
+   file and `reconcile` still said every row was accounted for. The row count it read comes from
+   the file's footer, which was intact. Fix: record a sha256 of each Parquet file when it is
+   written and re-check it. Cost, measured on the one-day run: about 9 s extra on the 146 s load,
+   and a 4 s reconcile over 1.3 GB. A row count proves the shape, a checksum proves the content.
+3. **Two loaders at once passed once and failed once.** The pass was luck. On the next run one
+   loader hit Windows "Access is denied" renaming a file the other had open, and the hour was
+   marked failed. A second bug was hiding behind it: only download failures were retried, so a
+   failed load stayed failed forever. Fixes: an exclusive lock per data directory, held as a SQLite
+   lock on its own file so the operating system releases it even when the holder is killed (a PID
+   lock file would go stale after a kill), and a separate `load_failed` status that the next load
+   retries. The second loader now refuses with exit code 3.
+
+### What this does not cover
+
+Disk full, power loss during a rename (it relies on NTFS replacing a file atomically), a network
+partition mid-listing, and a source that silently serves different bytes under the same name. The
+checksums detect change after the fact; they cannot tell you the source was right in the first
+place.

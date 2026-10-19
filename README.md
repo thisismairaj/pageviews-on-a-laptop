@@ -22,14 +22,34 @@ The limit to know about: this is a single machine, so it will not scale past wha
 | Rows loaded | 143,351,375 |
 | Rows quarantined | 0 |
 | Download | 174 s (2 connections) |
-| Load (count, classify, write Parquet) | 137 s, about 1.05 million rows/s |
+| Load (count, classify, write Parquet, checksum) | 146 s, about 0.98 million rows/s |
 | Parquet on disk | 1,338,033,466 bytes (not yet optimized, see below) |
 | Second run, same day | 2 s, nothing changed |
-| Reconcile | OK: every row is accounted for |
+| Reconcile (re-reads and re-hashes all Parquet) | 4 s, OK: every row is accounted for |
 
 A first query over the day: row count and total views in 0.30 s; the five most-viewed English pages in 3.35 s. These were not run cold, and the file cache was likely warm.
 
-Not measured yet: peak memory, CPU use during load, behavior under failure (kill mid-load, truncated or duplicated files). Those are the next milestone.
+Not measured yet: peak memory and CPU use during load.
+
+## Failure injection (milestone 2)
+
+Nine ways to break it on purpose, run against real data. All nine pass now, but the first run did not: three of the failures were real bugs in this project (see [DECISIONS.md](DECISIONS.md)).
+
+| Break | What happens |
+|---|---|
+| Kill the process mid-download | Resumes; the files end up byte-identical to the source |
+| Kill the process mid-load | Reconcile reports the half-done state; a rerun converges; no leftover temp files |
+| Truncate a raw file | That hour fails loudly, the other hours load, no partial output |
+| Flip a bit in a raw file | Same |
+| Same content under two names | Reconcile flags the duplicate |
+| A missing hour | Reconcile names it |
+| 600 garbage lines inside a valid file | All quarantined with reasons; rows in = loaded + quarantined |
+| Bit rot inside a Parquet file after load | Reconcile reports it (needed a checksum; a row count missed it) |
+| Two loaders at the same time | The second refuses to start; the first finishes |
+
+Full evidence per scenario: [RESULTS.md](RESULTS.md). Reproduce: `.venv/Scripts/python scripts/chaos.py data/raw --out RESULTS.md`.
+
+Not covered: disk full, power loss mid-rename, a source serving different bytes under the same name.
 
 ## Run it
 
@@ -60,4 +80,4 @@ Wikimedia pageviews, CC0. Page titles and counts only; no personal data.
 .venv/Scripts/python -m pytest
 ```
 
-15 tests: parsing, loading (bad lines, blank lines, a line with the delimiter byte), download resume, a corrupted download, a truncated download, reconcile (missing hours, a deleted file), and idempotent re-runs.
+18 tests: parsing, loading (bad lines, blank lines, a line with the delimiter byte), download resume, a corrupted download, a truncated download, reconcile (missing hours, a deleted file, damage inside a Parquet file), the lock (including after its holder is killed), and idempotent re-runs.

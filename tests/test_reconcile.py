@@ -48,3 +48,14 @@ def test_load_is_idempotent(tmp_path):
     before = {p.name: p.stat().st_mtime_ns for p in (out / "good").rglob("*.parquet")}
     assert load_run(con, tmp_path / "data" / "raw", out) == (0, 0)  # nothing left to do
     assert before == {p.name: p.stat().st_mtime_ns for p in (out / "good").rglob("*.parquet")}
+
+
+def test_damage_inside_a_parquet_file_is_caught(tmp_path):
+    """A row count comes from the file footer, so only a checksum notices damage in the middle."""
+    con, out = build(tmp_path, range(2))
+    target = out / "good" / "day=2024-01-01" / "hour=00.parquet"
+    data = bytearray(target.read_bytes())
+    data[len(data) // 2] ^= 0xFF
+    target.write_bytes(bytes(data))
+    problems, _ = reconcile(con, out, expected_hours=range(2))
+    assert any("changed since it was written" in p or "unreadable" in p for p in problems)
